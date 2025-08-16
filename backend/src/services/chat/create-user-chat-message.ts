@@ -1,14 +1,13 @@
 import { UserMessage } from '@prisma/client'
-
 import {
   UserMessageRepository,
   userMessageRepositoryInstance,
 } from '../../repositories/user-message.js'
-import {
-  ChatRepository,
-  chatRepositoryInstance,
-} from '../../repositories/chat.js'
 import { Either, Failure, Success } from '../../utils/either.js'
+import {
+  ChatManagementService,
+  chatManagementServiceInstance,
+} from './chat-management.service'
 
 export namespace CreateUserChatMessageDTO {
   export type Params = {
@@ -18,15 +17,13 @@ export namespace CreateUserChatMessageDTO {
   }
 
   export type Failure = { message: string }
-
   export type Success = UserMessage
-
   export type Result = Either<Failure, Success>
 }
 
 export class CreateUserChatMessageService {
   constructor(
-    private readonly chatRepository: ChatRepository,
+    private readonly chatService: ChatManagementService,
     private readonly userMessageRepository: UserMessageRepository,
   ) {}
 
@@ -39,34 +36,30 @@ export class CreateUserChatMessageService {
       return Failure.create({ message: 'Sender id is equal to receiver id' })
     }
 
-    const chat = await this.findOrCreateChat(senderId, receiverId)
+    const chatResult = await this.chatService.findOrCreateChat(senderId, receiverId)
 
-    const message = await this.userMessageRepository.create({
-      chatId: chat.id,
-      senderId,
-      content,
-    })
+    if (chatResult.isFailure()) {
+      return Failure.create(chatResult.value)
+    }
 
-    return Success.create(message)
-  }
+    try {
+      const message = await this.userMessageRepository.create({
+        chatId: chatResult.value.id,
+        senderId,
+        content,
+      })
 
-  private async findOrCreateChat(senderId: string, receiverId: string) {
-    const chat = await this.chatRepository.findOneByUsersId(
-      senderId,
-      receiverId,
-    )
-
-    if (chat) return chat
-
-    return this.chatRepository.create({
-      user1Id: senderId,
-      user2Id: receiverId,
-    })
+      return Success.create(message)
+    } catch (error) {
+      return Failure.create({
+        message: 'Failed to create message',
+      })
+    }
   }
 }
 
 export const createUserChatMessageServiceInstance =
   new CreateUserChatMessageService(
-    chatRepositoryInstance,
+    chatManagementServiceInstance,
     userMessageRepositoryInstance,
   )
